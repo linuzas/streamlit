@@ -982,13 +982,17 @@ def main():
         selected = st.sidebar.radio("Select Tool:", 
             ["Home", "Expert Chat", "Question Generator", "Interview Prep", "Image Generator"])
         user = get_user(st.session_state.current_user)
-        current_count = user.get("call_count", 0)
-        remaining_calls = max(0, 10 - current_count)
+        
+        MAX_CALLS = 10
 
+        current_count = user.get("call_count", 0)
+        remaining_calls = max(0, MAX_CALLS - current_count)
+
+        # ✅ Display Remaining Calls Only
         st.sidebar.markdown(
-            f"<div style='color:#ff4b4b; font-size:18px; font-weight:bold;'>🔥 Remaining Calls: {remaining_calls}/10</div>",
+            f"<div style='color:#ff4b4b; font-size:18px; font-weight:bold;'>🔥 Remaining Calls: {remaining_calls}</div>",
             unsafe_allow_html=True,
-            help="Free plan includes 10 API calls per day. Upgrade for more."
+            help=f"Free plan includes {MAX_CALLS} API calls per day. Upgrade for more."
         )
 
 
