@@ -7,12 +7,13 @@ from PIL import Image
 from datetime import datetime
 from pathlib import Path
 from supabase_helpers import get_user, save_user, update_chat, save_chat, get_user_chats, delete_chat, increment_api_calls, validate_password
+from supabase import create_client, Client
 
 # Load environment variables
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Set page config
 st.set_page_config(
@@ -143,6 +144,18 @@ def login_page():
                             st.session_state.logged_in = True
                             st.session_state.current_user = username
                             st.session_state.current_user_id = user["id"]
+
+                            today = datetime.utcnow().date()
+                            last_call_date = user.get("last_call_date")
+                            current_count = user.get("call_count", 0)
+
+                            # ✅ Reset call count if it's a new day
+                            if last_call_date != str(today):
+                                current_count = 0
+                                supabase.table("users").update({
+                                    "call_count": 10,  # Reset to 10/10 when a new day starts
+                                    "last_call_date": today.isoformat()
+                                }).eq("id", user["id"]).execute()
 
                             # ✅ Load chat history from Supabase chats table
                             chat_history = get_user_chats(user["id"])
@@ -780,10 +793,14 @@ def interview_prep():
                     st.error(f"Error evaluating solution: {str(e)}")
 
 
+import streamlit as st
+import io
+from PIL import Image
+import openai
+
 def generate_image():
     st.title("Image Generator")
     
-    # Let the user choose between generating a new image or editing an existing one
     mode = st.radio(
         "Select Mode:",
         ["Generate New Image", "Edit Existing Image"],
@@ -791,7 +808,6 @@ def generate_image():
     )
     
     if mode == "Generate New Image":
-        # Image generation settings for new image creation
         style = st.selectbox(
             "Select Image Style:",
             list(IMAGE_STYLES.keys()),
@@ -805,18 +821,17 @@ def generate_image():
         )
         
         if st.button("Generate Image"):
-            if not prompt.strip():  # Prevent empty input
+            if not prompt.strip():
                 st.warning("Please enter a description for the image.")
                 return
-
-            # Check API call limit before making request
+            
             if not increment_api_calls(st.session_state.current_user_id):
                 st.error("You have reached the maximum allowed number of calls for today (10). Please try again tomorrow.")
                 return
             
             try:
                 with st.spinner("Generating your image..."):
-                    # Enhance prompt with style
+                    # Format the prompt
                     enhanced_prompt = f"Create a {style.lower()} image of: {prompt}"
                     
                     response = openai.images.generate(
@@ -828,11 +843,11 @@ def generate_image():
                         style="natural" if style == "Natural" else "vivid"
                     )
                     
-                    # Display the generated image
+                    # ✅ Display the generated image
                     image_url = response.data[0].url
                     st.image(image_url, caption=f"Style: {style}", width=400)
                     
-                    # Update cost and usage details
+                    # ✅ Update cost and usage details
                     image_cost = IMAGE_COSTS["dall-e-3"]["standard_1024"]
                     st.session_state.total_api_cost += image_cost
                     st.session_state.model_costs["dall-e-3"] += image_cost
@@ -849,11 +864,10 @@ def generate_image():
         
         uploaded_file = st.file_uploader(
             "Upload an image to edit:",
-            type=["png", "jpg", "jpeg"],
+            type=["png", "jpg", "jpeg", "heic"],
             help="Upload an image that you want to edit."
         )
         
-        # Background selection for editing
         background = st.selectbox(
             "Select a Professional Background:",
             ["Professional Office", "Modern Office", "Minimalist", "Classic", "Outdoor Business"],
@@ -861,40 +875,42 @@ def generate_image():
         )
         
         if st.button("Edit Image"):
-            if not uploaded_file:  # Prevent empty input
+            if not uploaded_file:
                 st.warning("Please upload an image to edit.")
                 return
-
-            # Check API call limit before making request
+            
             if not increment_api_calls(st.session_state.current_user_id):
                 st.error("You have reached the maximum allowed number of calls for today (10). Please try again tomorrow.")
                 return
             
             try:
                 with st.spinner("Editing your image..."):
-                    # Open the uploaded image using Pillow
-                    image = Image.open(uploaded_file)
+                    # ✅ Step 1: Open the image
+                    try:
+                        image = Image.open(uploaded_file)
+                    except Exception as e:
+                        st.error(f"Error loading image: {str(e)}")
+                        return
                     
-                    # Convert image to PNG and allowed mode if necessary
-                    if image.mode not in ['RGBA', 'LA', 'L']:
-                        image = image.convert('RGBA')
-                    
-                    # Convert image to binary
+                    # ✅ Step 2: Convert to PNG (fix iPhone format issue)
+                    image = image.convert('RGBA')
+
+                    # ✅ Step 3: Save as binary (PNG)
                     with io.BytesIO() as output:
                         image.save(output, format="PNG")
                         png_data = output.getvalue()
                     image_file = io.BytesIO(png_data)
                     
-                    # Create a dummy mask (full white) of the same dimensions
+                    # ✅ Step 4: Create a dummy mask (full white)
                     mask = Image.new("L", image.size, 255)
                     with io.BytesIO() as mask_output:
                         mask.save(mask_output, format="PNG")
                         mask_data = mask_output.getvalue()
                     mask_file = io.BytesIO(mask_data)
 
-                    # Prepare the edit prompt
+                    # ✅ Step 5: Build the prompt for editing
                     edit_prompt = f"Replace the background with a {background.lower()} background while keeping the subject intact."
-
+                    
                     response = openai.images.edit(
                         image=image_file,
                         mask=mask_file,
@@ -903,11 +919,11 @@ def generate_image():
                         n=1
                     )
                     
-                    # Display the edited image
+                    # ✅ Step 6: Display the edited image
                     edited_image_url = response.data[0].url
                     st.image(edited_image_url, caption=f"Edited with {background} background", width=400)
                     
-                    # Update cost and usage details
+                    # ✅ Step 7: Update usage stats
                     image_cost = IMAGE_COSTS["dall-e-3"]["standard_1024"]
                     st.session_state.total_api_cost += image_cost
                     st.session_state.model_costs["dall-e-3"] += image_cost
@@ -918,6 +934,8 @@ def generate_image():
 
             except Exception as e:
                 st.error(f"Error editing image: {str(e)}")
+
+
 
 def main():
     # Load existing users
