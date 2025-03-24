@@ -153,7 +153,7 @@ def login_page():
                             if last_call_date != str(today):
                                 current_count = 0
                                 supabase.table("users").update({
-                                    "call_count": 10,  # Reset to 10/10 when a new day starts
+                                    "call_count": 0,  # Reset to 10/10 when a new day starts
                                     "last_call_date": today.isoformat()
                                 }).eq("id", user["id"]).execute()
 
